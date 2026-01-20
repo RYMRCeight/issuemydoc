@@ -71,39 +71,42 @@ async function issueDocx(){
   const contentHash=await hashDocxContent(zip);
 
   /* 2️⃣ Generate QR */
-  const verifyURL=
+  const verifyURL =
     `https://rymrceight.github.io/verifymydoc/#h=${contentHash}&doc=${encodeURIComponent(originalBaseName)}`;
-  const qrData=await QRCode.toDataURL(verifyURL,{width:600});
+  const qrData = await QRCode.toDataURL(verifyURL,{width:600});
 
   /* 3️⃣ Add QR image */
   zip.file("word/media/docutag_qr.png",qrData.split(",")[1],{base64:true});
 
   /* 4️⃣ Register PNG content type */
-  let ct=await zip.file("[Content_Types].xml").async("string");
+  let ct = await zip.file("[Content_Types].xml").async("string");
   if(!ct.includes('image/png')){
-    ct=ct.replace("</Types>",
+    ct = ct.replace("</Types>",
       '<Default Extension="png" ContentType="image/png"/></Types>');
     zip.file("[Content_Types].xml",ct);
   }
 
   /* 5️⃣ Add relationship */
-  let rels=await zip.file("word/_rels/document.xml.rels").async("string");
-  const rId="rIdDocuTag"+Date.now();
-  rels=rels.replace("</Relationships>",
+  let rels = await zip.file("word/_rels/document.xml.rels").async("string");
+  const rId = "rIdDocuTag" + Date.now();
+  rels = rels.replace("</Relationships>",
     `<Relationship Id="${rId}"
       Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
       Target="media/docutag_qr.png"/></Relationships>`);
   zip.file("word/_rels/document.xml.rels",rels);
 
-  /* 6️⃣ Insert FULL Word-safe drawing */
-  let docXml=await zip.file("word/document.xml").async("string");
-  const qrXml=`
+  /* 6️⃣ UNIQUE docPr id (CRITICAL FIX) */
+  const docPrId = Date.now(); // guarantees uniqueness
+
+  /* 7️⃣ Insert FULL Word-safe drawing */
+  let docXml = await zip.file("word/document.xml").async("string");
+  const qrXml = `
 <w:p>
  <w:r>
   <w:drawing>
    <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
     <wp:extent cx="900000" cy="900000"/>
-    <wp:docPr id="1" name="DocuTag QR"/>
+    <wp:docPr id="${docPrId}" name="DocuTag QR"/>
     <wp:cNvGraphicFramePr>
      <a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
     </wp:cNvGraphicFramePr>
@@ -133,11 +136,11 @@ async function issueDocx(){
   </w:drawing>
  </w:r>
 </w:p>`;
-  docXml=docXml.replace("</w:body>",qrXml+"</w:body>");
+  docXml = docXml.replace("</w:body>",qrXml+"</w:body>");
   zip.file("word/document.xml",docXml);
 
-  /* 7️⃣ Final file */
-  issuedBlob=await zip.generateAsync({type:"blob"});
+  /* 8️⃣ Final file */
+  issuedBlob = await zip.generateAsync({type:"blob"});
   document.getElementById("done").classList.remove("hidden");
 }
 
