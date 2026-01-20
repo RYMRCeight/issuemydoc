@@ -40,7 +40,6 @@ STAMP & ISSUE DOCX
 
 </div>
 
-<!-- FOOTER -->
 <p class="footer mt-6 text-center">
   This system is developed by Reymarc Jason T. Tampos
 </p>
@@ -49,11 +48,13 @@ STAMP & ISSUE DOCX
 let issuedBlob=null;
 let originalBaseName="";
 
+/* ===== SHA-256 ===== */
 async function sha256(data){
   const h=await crypto.subtle.digest("SHA-256",data);
   return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 
+/* ===== CONTENT-ONLY HASH ===== */
 async function hashDocxContent(zip){
   const xml=await zip.file("word/document.xml").async("string");
   return sha256(new TextEncoder().encode(xml));
@@ -66,15 +67,18 @@ async function issueDocx(){
   originalBaseName=file.name.replace(/\.docx$/i,"");
   const zip=await JSZip.loadAsync(file);
 
+  /* 1️⃣ Hash document content BEFORE QR */
   const contentHash=await hashDocxContent(zip);
 
+  /* 2️⃣ Generate QR */
   const verifyURL=
-`https://rymrceight.github.io/verifymydoc/#h=${contentHash}&doc=${encodeURIComponent(originalBaseName)}`;
-
+    `https://rymrceight.github.io/verifymydoc/#h=${contentHash}&doc=${encodeURIComponent(originalBaseName)}`;
   const qrData=await QRCode.toDataURL(verifyURL,{width:600});
 
+  /* 3️⃣ Add QR image */
   zip.file("word/media/docutag_qr.png",qrData.split(",")[1],{base64:true});
 
+  /* 4️⃣ Register PNG content type */
   let ct=await zip.file("[Content_Types].xml").async("string");
   if(!ct.includes('image/png')){
     ct=ct.replace("</Types>",
@@ -82,37 +86,57 @@ async function issueDocx(){
     zip.file("[Content_Types].xml",ct);
   }
 
+  /* 5️⃣ Add relationship */
   let rels=await zip.file("word/_rels/document.xml.rels").async("string");
   const rId="rIdDocuTag"+Date.now();
   rels=rels.replace("</Relationships>",
     `<Relationship Id="${rId}"
-     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-     Target="media/docutag_qr.png"/></Relationships>`);
+      Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+      Target="media/docutag_qr.png"/></Relationships>`);
   zip.file("word/_rels/document.xml.rels",rels);
 
+  /* 6️⃣ Insert FULL Word-safe drawing */
   let docXml=await zip.file("word/document.xml").async("string");
   const qrXml=`
-<w:p><w:r><w:drawing>
-<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
-<wp:extent cx="900000" cy="900000"/>
-<wp:docPr id="1" name="DocuTag QR"/>
-<wp:cNvGraphicFramePr>
-<a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
-</wp:cNvGraphicFramePr>
-<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
-<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
-<pic:blipFill>
-<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rId}"/>
-</pic:blipFill>
-</pic:pic>
-</a:graphicData>
-</a:graphic>
-</wp:inline>
-</w:drawing></w:r></w:p>`;
+<w:p>
+ <w:r>
+  <w:drawing>
+   <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+    <wp:extent cx="900000" cy="900000"/>
+    <wp:docPr id="1" name="DocuTag QR"/>
+    <wp:cNvGraphicFramePr>
+     <a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
+    </wp:cNvGraphicFramePr>
+    <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+     <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+      <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+       <pic:nvPicPr>
+        <pic:cNvPr id="0" name="DocuTag QR"/>
+        <pic:cNvPicPr/>
+       </pic:nvPicPr>
+       <pic:blipFill>
+        <a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          r:embed="${rId}"/>
+        <a:stretch><a:fillRect/></a:stretch>
+       </pic:blipFill>
+       <pic:spPr>
+        <a:xfrm>
+         <a:off x="0" y="0"/>
+         <a:ext cx="900000" cy="900000"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+       </pic:spPr>
+      </pic:pic>
+     </a:graphicData>
+    </a:graphic>
+   </wp:inline>
+  </w:drawing>
+ </w:r>
+</w:p>`;
   docXml=docXml.replace("</w:body>",qrXml+"</w:body>");
   zip.file("word/document.xml",docXml);
 
+  /* 7️⃣ Final file */
   issuedBlob=await zip.generateAsync({type:"blob"});
   document.getElementById("done").classList.remove("hidden");
 }
