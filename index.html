@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DocuTag – Issuance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+<script src="https://unpkg.com/jszip/dist/jszip.min.js"></script>
+
+<style>
+body{background:#121212;color:white;font-family:Inter,sans-serif}
+.card{background:#181818;border-radius:8px}
+.btn{background:#1DB954;color:black;font-weight:700}
+.input{background:#2a2a2a;color:white}
+.footer{color:#777;font-size:0.75rem}
+</style>
+</head>
+
+<body class="min-h-screen flex flex-col items-center justify-center p-6">
+
+<div class="card w-full max-w-md p-6 space-y-4">
+
+<h1 class="text-xl font-bold text-center">DocuTag Issuance</h1>
+
+<input type="file" id="fileInput" accept=".docx"
+ class="input w-full p-2 rounded">
+
+<button onclick="issueDocx()" class="btn w-full py-2 rounded">
+STAMP & ISSUE DOCX
+</button>
+
+<div id="done" class="hidden text-center space-y-2">
+  <p class="font-bold text-green-400">Issued Successfully</p>
+  <button onclick="download()" class="btn px-4 py-2 rounded">
+    DOWNLOAD STAMPED DOCX
+  </button>
+</div>
+
+</div>
+
+<!-- FOOTER -->
+<p class="footer mt-6 text-center">
+  This system is developed by Reymarc Jason T. Tampos
+</p>
+
+<script>
+let issuedBlob=null;
+let originalBaseName="";
+
+async function sha256(data){
+  const h=await crypto.subtle.digest("SHA-256",data);
+  return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+async function hashDocxContent(zip){
+  const xml=await zip.file("word/document.xml").async("string");
+  return sha256(new TextEncoder().encode(xml));
+}
+
+async function issueDocx(){
+  const file=document.getElementById("fileInput").files[0];
+  if(!file){alert("Please select a DOCX file.");return;}
+
+  originalBaseName=file.name.replace(/\.docx$/i,"");
+  const zip=await JSZip.loadAsync(file);
+
+  const contentHash=await hashDocxContent(zip);
+
+  const verifyURL=
+`https://rymrceight.github.io/verifymydoc/#h=${contentHash}&doc=${encodeURIComponent(originalBaseName)}`;
+
+  const qrData=await QRCode.toDataURL(verifyURL,{width:600});
+
+  zip.file("word/media/docutag_qr.png",qrData.split(",")[1],{base64:true});
+
+  let ct=await zip.file("[Content_Types].xml").async("string");
+  if(!ct.includes('image/png')){
+    ct=ct.replace("</Types>",
+      '<Default Extension="png" ContentType="image/png"/></Types>');
+    zip.file("[Content_Types].xml",ct);
+  }
+
+  let rels=await zip.file("word/_rels/document.xml.rels").async("string");
+  const rId="rIdDocuTag"+Date.now();
+  rels=rels.replace("</Relationships>",
+    `<Relationship Id="${rId}"
+     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+     Target="media/docutag_qr.png"/></Relationships>`);
+  zip.file("word/_rels/document.xml.rels",rels);
+
+  let docXml=await zip.file("word/document.xml").async("string");
+  const qrXml=`
+<w:p><w:r><w:drawing>
+<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+<wp:extent cx="900000" cy="900000"/>
+<wp:docPr id="1" name="DocuTag QR"/>
+<wp:cNvGraphicFramePr>
+<a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
+</wp:cNvGraphicFramePr>
+<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<pic:blipFill>
+<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rId}"/>
+</pic:blipFill>
+</pic:pic>
+</a:graphicData>
+</a:graphic>
+</wp:inline>
+</w:drawing></w:r></w:p>`;
+  docXml=docXml.replace("</w:body>",qrXml+"</w:body>");
+  zip.file("word/document.xml",docXml);
+
+  issuedBlob=await zip.generateAsync({type:"blob"});
+  document.getElementById("done").classList.remove("hidden");
+}
+
+function download(){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(issuedBlob);
+  a.download=originalBaseName+"_Stamped.docx";
+  a.click();
+}
+</script>
+
+</body>
+</html>
